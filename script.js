@@ -198,18 +198,18 @@ const defaultPages = [
     content: ''
   },
   {
-    id: 'page-shop',
-    title: '🛍️ חנות',
+    id: 'page-news',
+    title: '📰 מבזקי חדשות',
     content: ''
   },
   {
-    id: 'page-charts',
-    title: '📈 גרפים ונתשדשונים',
+    id: 'page-graphs',
+    title: '📊 מדדים וסקרים',
     content: ''
   },
   {
     id: 'page-forum',
-    title: '💬 פורום',
+    title: '💬 פורום דיונים',
     content: ''
   }
 ];
@@ -217,7 +217,7 @@ const defaultPages = [
 // הגדרות ברירת מחדל (יוחלפו אם יש שמירה)
 let pages = defaultPages;
 let activePageId = 'page-main';
-let topNavPages = ['page-main', 'page-shop', 'page-charts', 'page-forum']; // העמודים שמופיעים בתפריט העליון
+let topNavPages = ['page-main', 'page-news', 'page-graphs', 'page-forum']; // העמודים שמופיעים בתפריט העליון
 let isEditMode = false; // ברירת מחדל: אורח (ללא עריכה)
 let undoStack = []; // מערך לשמירת היסטוריית שינויים לצורך ביטול (Undo)
 let siteBackgrounds = { dashboard: null, topNav: null, main: null };
@@ -355,6 +355,58 @@ async function initSite() {
       if (data.pages) pages = data.pages;
       if (data.activePageId) activePageId = data.activePageId;
       if (data.topNavPages) topNavPages = data.topNavPages;
+      
+      // הגירת נתונים אוטומטית מאתר ההכרויות/חנות הישן לאתר חדשות 24/7 מעודכן
+      let needsMigration = false;
+      if (Array.isArray(pages)) {
+        pages.forEach(p => {
+          const oldTitle = p.title || '';
+          if (oldTitle.includes('הכרויות') || oldTitle.includes('חנות') || oldTitle.includes('גרפים')) {
+            p.title = oldTitle.replace('הכרויות דרך המיטה', 'חדשות 24/7')
+                               .replace('הכרויות', 'חדשות חמות')
+                               .replace('חנות', 'מבזקי חדשות')
+                               .replace('גרפים ונתשדשונים', 'מדדים וסקרים')
+                               .replace('פורום', 'פורום דיונים');
+            needsMigration = true;
+          }
+          if (p.id === 'page-shop') {
+            p.id = 'page-news';
+            needsMigration = true;
+          }
+          if (p.id === 'page-charts') {
+            p.id = 'page-graphs';
+            needsMigration = true;
+          }
+          if (p.content && p.content.includes('הכרויות')) {
+            p.content = p.content.replace(/הכרויות דרך המיטה/g, 'חדשות 24/7')
+                                 .replace(/הכרויות/g, 'חדשות חמות');
+            needsMigration = true;
+          }
+        });
+      }
+      if (Array.isArray(topNavPages)) {
+        const mapped = topNavPages.map(id => {
+          if (id === 'page-shop') return 'page-news';
+          if (id === 'page-charts') return 'page-graphs';
+          return id;
+        });
+        if (JSON.stringify(topNavPages) !== JSON.stringify(mapped)) {
+          topNavPages = mapped;
+          needsMigration = true;
+        }
+      }
+      if (activePageId === 'page-shop') {
+        activePageId = 'page-news';
+        needsMigration = true;
+      }
+      if (activePageId === 'page-charts') {
+        activePageId = 'page-graphs';
+        needsMigration = true;
+      }
+      
+      if (needsMigration) {
+        setTimeout(saveToStorage, 1000);
+      }
        if (data.siteBackgrounds) siteBackgrounds = data.siteBackgrounds;
       if (data.hideCart !== undefined) hideCart = data.hideCart;
       if (data.hideChat !== undefined) hideChat = data.hideChat;
@@ -417,27 +469,31 @@ async function initSite() {
     }
   }
 
-  // הוספת עמוד כתבות אוטומטית אם עוד לא קיים
-  if (!pages.find(p => p.content && p.content.includes('articles-page') && !p.content.includes('stories-page') && !p.content.includes('photos-page') && !p.content.includes('courses-page'))) {
-    const mainPage = pages.find(p => p.id === 'page-main');
+  // הוספת עמוד כתבות אוטומטית אם עוד לא קיים או אם העמוד הראשי ריק/אינו מעוצב כחדשות
+  const mainPage = pages.find(p => p.id === 'page-main');
+  if (mainPage && (!mainPage.content || !mainPage.content.includes('articles-page'))) {
+    mainPage.content = buildArticlesPage(ARTICLES_SAMPLES);
+    mainPage.title = 'חדשות ראשי';
+    saveToStorage();
+  } else if (!pages.find(p => p.content && p.content.includes('articles-page') && !p.content.includes('stories-page') && !p.content.includes('photos-page') && !p.content.includes('courses-page'))) {
     if (mainPage) {
       mainPage.content = buildArticlesPage(ARTICLES_SAMPLES);
-      mainPage.title = 'כתבות';
+      mainPage.title = 'חדשות ראשי';
     } else {
       const newPageId = 'page-articles-' + Date.now();
-      pages.unshift({ id: newPageId, title: 'כתבות', content: buildArticlesPage(ARTICLES_SAMPLES) });
+      pages.unshift({ id: newPageId, title: 'חדשות ראשי', content: buildArticlesPage(ARTICLES_SAMPLES) });
       if (!topNavPages.includes(newPageId)) topNavPages.unshift(newPageId);
       activePageId = newPageId;
     }
     saveToStorage();
   }
 
-  // העברת עמוד הכתבות לעמוד הראשי ושינוי שמו ל"כתבות" אם הוא קיים בנפרד
+  // העברת עמוד הכתבות לעמוד הראשי ושינוי שמו ל"חדשות ראשי" אם הוא קיים בנפרד
   const mainPage = pages.find(p => p.id === 'page-main');
   const separateArticlesPage = pages.find(p => p.content && p.content.includes('articles-page') && !p.content.includes('stories-page') && !p.content.includes('photos-page') && !p.content.includes('courses-page') && p.id !== 'page-main');
   if (mainPage && separateArticlesPage) {
     mainPage.content = separateArticlesPage.content;
-    mainPage.title = 'כתבות';
+    mainPage.title = 'חדשות ראשי';
     pages = pages.filter(p => p.id !== separateArticlesPage.id);
     topNavPages = topNavPages.filter(id => id !== separateArticlesPage.id);
     activePageId = mainPage.id;
@@ -446,7 +502,7 @@ async function initSite() {
 
   // הוספת עמוד חנות אוטומטית אם עוד לא קיים
   if (!pages.find(p => p.content && p.content.includes('shop-page'))) {
-    const shopPage = { id: 'page-shop-' + Date.now(), title: 'חנות', content: buildShopPage(SHOP_SAMPLES) };
+    const shopPage = { id: 'page-shop-' + Date.now(), title: 'מנויים ומוצרים', content: buildShopPage(SHOP_SAMPLES) };
     pages.push(shopPage);
     if (!topNavPages.includes(shopPage.id)) topNavPages.push(shopPage.id);
     saveToStorage();
@@ -454,7 +510,7 @@ async function initSite() {
 
   // הוספת עמוד סיפורים אוטומטית אם עוד לא קיים
   if (!pages.find(p => p.content && p.content.includes('stories-page'))) {
-    const storyPage = { id: 'page-stories-' + Date.now(), title: 'סיפורים', content: buildStoriesPage(STORIES_SAMPLES) };
+    const storyPage = { id: 'page-stories-' + Date.now(), title: 'כתבות מומלצות', content: buildStoriesPage(STORIES_SAMPLES) };
     pages.push(storyPage);
     if (!topNavPages.includes(storyPage.id)) topNavPages.push(storyPage.id);
     saveToStorage();
@@ -462,7 +518,7 @@ async function initSite() {
 
   // הוספת עמוד תמונות אוטומטית אם עוד לא קיים
   if (!pages.find(p => p.content && p.content.includes('photos-page'))) {
-    const photoPage = { id: 'page-photos-' + Date.now(), title: 'תמונות', content: buildPhotosPage(PHOTOS_SAMPLES) };
+    const photoPage = { id: 'page-photos-' + Date.now(), title: 'גלריית תמונות', content: buildPhotosPage(PHOTOS_SAMPLES) };
     pages.push(photoPage);
     if (!topNavPages.includes(photoPage.id)) topNavPages.push(photoPage.id);
     saveToStorage();
@@ -470,7 +526,7 @@ async function initSite() {
 
   // הוספת עמוד קורסים אוטומטית אם עוד לא קיים
   if (!pages.find(p => p.content && p.content.includes('courses-page'))) {
-    const coursePage = { id: 'page-courses-' + Date.now(), title: 'קורסים', content: buildCoursesPage(COURSES_SAMPLES) };
+    const coursePage = { id: 'page-courses-' + Date.now(), title: 'משדרי וידאו', content: buildCoursesPage(COURSES_SAMPLES) };
     pages.push(coursePage);
     if (!topNavPages.includes(coursePage.id)) topNavPages.push(coursePage.id);
     saveToStorage();
@@ -1616,11 +1672,10 @@ if (btnToggleChatVisibility) {
 // כדי שהתפריט העליון יעבוד כשהוא מפנה לעמודים ידועים (אם הם קיימים עדיין במערכת)
 const topNavMapping = {
   'top-nav-main': 'page-main',
-  'top-nav-shop': 'page-shop',
-  'top-nav-charts': 'page-charts',
+  'top-nav-news': 'page-news',
+  'top-nav-graphs': 'page-graphs',
   'top-nav-forum': 'page-forum',
-  'top-nav-services': 'page-services',
-  'top-nav-meeting': 'page-meeting'
+  'top-nav-opinions': 'page-opinions'
 };
 
 // האזנה קבועה (Event Delegation) לכל הקישורים בתפריט העליון
@@ -4239,12 +4294,10 @@ if (btnAddArticlesPage) {
 // ===== עמוד חנות =====
 
 const SHOP_SAMPLES = [
-  { id: 'p1', name: 'AirPods Max 2 - Midnight', label: 'חריטה חינם', price: '₪2,199', image: 'https://images.unsplash.com/photo-1625245488600-f03fef636a3c?w=600&q=80', link: '' },
-  { id: 'p2', name: 'AirPods Pro 3', label: 'חריטה חינם', price: '₪999', image: 'https://images.unsplash.com/photo-1606220588913-b3aacb4d2f46?w=600&q=80', link: '' },
-  { id: 'p3', name: 'AirPods 4 עם ביטול רעשים אקטיבי', label: 'חריטה חינם', price: '₪749', image: 'https://images.unsplash.com/photo-1603351154351-5e2d0600bb77?w=600&q=80', link: '' },
-  { id: 'p4', name: 'iPhone 16 Pro', label: 'עד 24 תשלומים', price: '₪4,799', image: 'https://images.unsplash.com/photo-1592286927505-1def25115558?w=600&q=80', link: '' },
-  { id: 'p5', name: 'MacBook Air M3', label: 'הנחת סטודנט', price: '₪4,499', image: 'https://images.unsplash.com/photo-1517336714731-489689fd1ca8?w=600&q=80', link: '' },
-  { id: 'p6', name: 'Apple Watch Series 10', label: 'רצועה חינם', price: '₪1,799', image: 'https://images.unsplash.com/photo-1546868871-7041f2a55e12?w=600&q=80', link: '' }
+  { id: 'p1', name: 'מנוי שנתי דיגיטלי פלוס', label: 'הנחה של 20%', price: '₪49 / חודש', image: 'https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=600&q=80', link: '' },
+  { id: 'p2', name: 'מנוי חודשי דיגיטלי', label: 'ללא התחייבות', price: '₪29 / חודש', image: 'https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=600&q=80', link: '' },
+  { id: 'p3', name: 'מהדורת סוף השבוע המודפסת', label: 'משלוח עד הבית', price: '₪89 / חודש', image: 'https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=600&q=80', link: '' },
+  { id: 'p4', name: 'כרטיס כניסה לוועידת הכלכלה השנתית', label: 'אירוע VIP', price: '₪299', image: 'https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=600&q=80', link: '' }
 ];
 
 function buildShopPage(products) {
@@ -4276,12 +4329,11 @@ function buildShopPage(products) {
     </div>
   `).join('');
 
-  const json = encodeURIComponent(JSON.stringify(products));
   return `<div class="shop-page" data-products-json="${json}">
     <div class="shop-inner">
       <div class="shop-header">
-        <h1 class="shop-title">החנות</h1>
-        <p class="shop-subtitle">כל המוצרים שאתם אוהבים, במקום אחד.</p>
+        <h1 class="shop-title">מנויים ומוצרי תוכן</h1>
+        <p class="shop-subtitle">תמכו בעיתונות עצמאית ורכשו מנוי דיגיטלי או מוצרים מבית המערכת.</p>
       </div>
       <div class="shop-search-wrap">
         <input type="text" class="shop-search" placeholder="🔍 חיפוש מוצרים..." oninput="shopSearch(this.value)">
